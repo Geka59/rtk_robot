@@ -1,0 +1,404 @@
+/*
+   Данный алгоритм позволяет получить через Serial пачку значений, и раскидать
+   их в целочисленный массив. Использовать можно банально для управления
+   ЧЕМ УГОДНО через bluetooth, так как bluetooth модули есть UART интерфейс связи.
+   Либо управлять через Serial с какой-то программы с ПК
+   Как использовать:
+   1) В PARSE_AMOUNT указывается, какое количество значений мы хотим принять.
+   От этого значения напрямую зависит размер массива принятых данных, всё просто
+   2) Пакет данных на приём должен иметь вид:
+   Начало - символ $
+   Разделитель - пробел
+   Завершающий символ - ;
+   Пример пакета: $110 25 600 920;  будет раскидан в массив data согласно порядку слева направо
+   Что делает данный скетч:
+   Принимает пакет данных указанного выше вида, раскидывает его в массив data, затем выводит обратно в порт.
+   Отличие от предыдущего примера: написан мной, не используя никаких хитрых функций. Предельно просто и понятно работает
+*/
+//left  //d20 d21белый d2зеленый
+// 6 - зеленый PWM  D8
+// 5 - белый INA D6
+// 4 - оранжевый INB D7
+
+
+// right d11 //d28белый d24 оранжевый
+// 6 - зеленый PWM D4 
+// 5 - белый INA D2
+// 4 - оранжевый INB D3
+
+#include <Servo.h>
+///////// servo pins 9 10 11 12
+#define pin_s1_l 11
+#define pin_s1_main 11 // серво манипулятор главное звено
+#define pin_s2 11 // серво захват
+#define pin_s3 11
+#define pin_s4 11
+#define pin_s5 11
+
+
+Servo servo5;
+Servo servo4;
+Servo servo2_catch;
+Servo servo3;
+Servo servo1_l;
+Servo servo1_s1_main;
+
+
+
+//#define
+// КD6   
+// О D7   
+// Ж D8   
+// З D9     
+// С D3    
+// Ф D4 
+
+#define M1_PWM 5 // ШИМ пин, на плате 6 ..2
+#define M1_INA 3 // INA пин, на плате ..20
+#define M1_INB 4   // INB пин, на плате  ..21
+
+#define M2_PWM 8 // ШИМ пин, на плате ..11
+#define M2_INA 6 // INA пин, на плате  ..28
+#define M2_INB 7 // INB пин, на плате ..24
+
+//#define PARSE_AMOUNT 12         // число значений в массиве, который хотим получить
+//int data[PARSE_AMOUNT];     // массив численных значений после парсинга
+//boolean recievedFlag;
+//boolean getStarted;
+//byte index;
+//String string_convert = "";
+
+////////
+//#include <Dynamixel_Serial.h>       // Library needed to control Dynamixal servo
+//
+//#define SERVO_ID 0x03               // ID of which we will set Dynamixel too
+//#define SERVO_ControlPin 0x05       // Control pin of buffer chip, NOTE: this does not matter becasue we are not using a half to full contorl buffer.
+//#define SERVO_SET_Baudrate 57600    // Baud rate speed which the Dynamixel will be set too (57600)
+//#define CW_LIMIT_ANGLE 0x001        // lowest clockwise angle is 1, as when set to 0 it set servo to wheel mode
+//#define CCW_LIMIT_ANGLE 0xFFF       // Highest anit-clockwise angle is 0XFFF, as when set to 0 it set servo to wheel mode
+
+
+
+int xleft=127;
+int yleft=127;
+int xright=127;
+int yright=127;
+int a_button;
+int b_button;
+int x_button;
+int dpad_left;
+int dpad_right;
+int dpad_up;
+int dpad_down;
+int y_button;
+int right_shoulder;
+int left_shoulder;
+int r_trigger_index_pos ;
+int l_trigger_index_pos;
+
+
+
+bool before_mode=0;
+bool control_mode=0;
+
+int angle1=90;
+//int angle1_r;
+int angle2=10;
+int angle3=90;
+int angle4=90;
+int angle5=40;
+
+int home_angle1=15;
+//int angle1_r;
+int home_angle2=11;
+int home_angle3=90;
+int home_angle4=90;
+int home_angle5=40;
+
+//int dynamixelAngle=2047;
+
+int kin_angle1=90;
+int kin_angle2=10;
+int kin_angle3=90;
+
+
+
+uint32_t tmr1;
+uint32_t atmr1;
+uint32_t tmr2;
+uint32_t tmr3;
+uint32_t atmr4;
+uint32_t atmr5;
+
+byte deadzone_s1_l[] = {15,180};// 0  самый перед
+byte deadzone_s1_r[] = {180,15};//180 самый перед;
+//byte deadzone_s5[] = {10,79};
+byte deadzone_s2[] = {11,180};
+byte deadzone_s3[] = {0,180};
+byte deadzone_s4[] = {0,180};
+byte deadzone_s5[] = {40,130};
+
+bool start_parce=false;
+bool good_packet=false;
+int index;
+unsigned char data[19];
+typedef uint16_t ui16;
+typedef uint8_t ui8;
+
+
+ui16 crc16;
+ui16 crc16_custom (ui8 *data, ui16 length1){
+   ui16 crc = 0xFFFF;
+    for (int i=0; i<length1; i++){
+        crc ^= data[i] << 8;
+        for (int j=0; j<8;j++){
+            if ((crc & 0x8000) > 0)
+                crc =(crc << 1) ^ 0x1021;
+            else
+                crc = crc << 1;}}
+    return crc & 0xFFFF;}
+
+
+
+
+
+void parsing() {
+  if (Serial2.available() >= 22) {
+    unsigned char incomingByte = Serial2.read();
+    if (incomingByte == 255)
+    {
+       for(int i = 0; i < 19; i++)
+         data[i] = Serial2.read();
+
+         crc16 = Serial2.read();
+         crc16 |= ((Serial2.read() << 8) & 0xFF00);
+        if (crc16_custom(data, 19) == crc16)
+        {
+          //for(int i = 0; i < 16; i++)
+          //{break;
+            //Serial.print(data[i]);
+            //Serial.print(" ");
+          //}
+           xleft=data[0];
+           yleft=data[1];
+           xright=data[2];
+           yright=data[3];
+            a_button=data[4];
+            b_button=data[5];
+            x_button=data[6];
+            y_button=data[7];
+            dpad_right=data[8];
+            dpad_left=data[9] ;
+            
+            dpad_up=data[10];
+            dpad_down=data[11];
+            right_shoulder=data[12];
+            left_shoulder=data[13];
+
+            r_trigger_index_pos=data[14];
+            l_trigger_index_pos=data[15];
+
+            kin_angle1=data[16];
+            kin_angle2=data[17];
+            kin_angle3=data[18];
+
+            ina_loop();
+            Mpu_loop();
+
+
+          //Serial.println(" ");
+        }
+       
+    }
+  }
+ }
+
+ 
+void setup() {
+  delay(1000);
+  //Dynamixel.begin(Serial2,SERVO_SET_Baudrate);                                    // We now need to set Ardiuno to the new Baudrate speed
+    //Dynamixel.setDirectionPin(SERVO_ControlPin);                            // Optional. Set direction control pin
+    //Dynamixel.setMode(SERVO_ID, SERVO, CW_LIMIT_ANGLE, CCW_LIMIT_ANGLE);  
+    //Dynamixel.servo(SERVO_ID,2047,300);
+    //Dynamixel.servo(SERVO_ID,2047,300);
+  //myservo1.attach(8);
+  //myservo2_catch.attach(9);
+  pinMode(M1_PWM, OUTPUT);
+  pinMode(M1_INA, OUTPUT);
+  pinMode(M1_INB, OUTPUT);
+  pinMode(M2_PWM, OUTPUT);
+  pinMode(M2_INA, OUTPUT);
+  pinMode(M2_INB, OUTPUT);
+  Serial.begin(115200);
+  Serial2.begin(57600);
+  servo1_l.attach(pin_s1_l);
+  servo1_s1_main.attach(pin_s1_main);
+  servo2_catch.attach(pin_s2);
+  servo3.attach(pin_s3);
+  servo4.attach(pin_s4);
+  servo5.attach(pin_s5);
+  servo1_l.write(180-15);
+  servo1_s1_main.write(15);
+  servo2_catch.write(50);
+  servo3.write(0);
+  servo4.write(90);
+  servo5.write(44);
+  Mpu_setup();
+  ina_setup();
+
+
+
+}
+void loop() {
+  //Mpu_loop();
+  //debug_print();
+  
+
+  
+//yleft=127;
+//yright=127;
+//xleft=127;
+//xright=127;
+ parsing();       // функция парсинга
+
+
+if ((control_mode!=a_button)&&(before_mode==a_button)){control_mode=a_button;}
+before_mode=a_button;
+//Serial.println(control_mode);
+
+ //if (((millis()-atmr4)>7)&&(l_trigger_index_pos>0)&&(dynamixelAngle<4080)){dynamixelAngle+=l_trigger_index_pos;Serial.println(dynamixelAngle); Dynamixel.servo(SERVO_ID,dynamixelAngle,600);atmr4=millis();}
+ //if (((millis()-atmr5)>7)&&(r_trigger_index_pos>0)&&(dynamixelAngle>15)){dynamixelAngle-=r_trigger_index_pos;Serial.println(dynamixelAngle); Dynamixel.servo(SERVO_ID,dynamixelAngle,600);atmr5=millis();}
+//Dynamixel.servo(SERVO_ID,0x001,0x100);   // Move servo to angle 1(0.088 degree) at speed 100
+// 
+//  Dynamixel.servo(SERVO_ID,0xFFF,0x3FF);  //  Move servo to max angle at max speed (1023)
+//  delay(4000);
+if (control_mode==0){
+  if (yright>=127){ 
+  digitalWrite(M1_INA, HIGH);
+  digitalWrite(M1_INB, LOW);
+  analogWrite(M1_PWM, 2*(yright-127));}
+  if (yright<127){ 
+  digitalWrite(M1_INA, LOW);
+  digitalWrite(M1_INB, HIGH);
+  analogWrite(M1_PWM, 2*(127-yright));}
+
+  ///---------------------------/M2
+  if (yleft<127){ 
+  digitalWrite(M2_INA, HIGH);
+  digitalWrite(M2_INB, LOW);
+ 
+  analogWrite(M2_PWM, 2*(127-yleft));}
+  if (yleft>=127){ 
+  digitalWrite(M2_INA, LOW);
+  digitalWrite(M2_INB, HIGH);
+ 
+  analogWrite(M2_PWM, 2*(yleft-127));}
+  }// end driving
+
+
+
+
+if (control_mode==1){
+  //servo1_l.write(180-kin_angle1);//180
+  servo1_s1_main.write(angle1);
+  servo2_catch.write(angle2);
+ // servo3.write(kin_angle3);
+  
+//  Serial.print("  ");
+//  Serial.print(kin_angle1);
+//  Serial.print("  ");
+//  Serial.print(kin_angle2);
+//  Serial.print("  ");
+//  Serial.print(kin_angle3);
+  }
+  if ((millis()-tmr2>=10)&&(dpad_down==1)&&(angle1<180)){angle1++;tmr2=millis();}
+  if ((millis()-tmr2>=10)&&(dpad_up==1)&&(angle1>0)){angle1--;tmr2=millis();}
+
+
+  if ((millis()-tmr3>=18)&&(right_shoulder==1)&&(angle2<85)){angle2++;tmr3=millis();Serial.println("yep");}
+  if ((millis()-tmr3>=18)&&(left_shoulder==1)&&(angle2>10)){angle2--;tmr3=millis();Serial.println("no yep");}
+  
+// if(x_button==1){//home position
+//  servo1_l.write(180-15);
+//  servo1_s1_main.write(15);
+//  servo2_catch.write(10);
+//  servo3.write(0);
+//  servo4.write(90);
+//  servo5.write(44);
+//   //Dynamixel.servo(SERVO_ID,2047,250);
+//    }
+//if (b_button==1){
+//  servo1_l.write(180-90);
+//  servo1_s1_main.write(90);
+//  servo2_catch.write(10);
+//  servo3.write(0);
+//  servo4.write(90);
+   //Dynamixel.servo(SERVO_ID,2047,250);
+  }
+
+ //servo4.write(angle4);
+ //servo5.write(angle5);
+  
+
+//}
+
+
+
+  
+//  if (control_mode==0){
+//  
+// } } ///// end of driving mode////
+// 
+// if (millis() - tmr1 >= 80) {  // ищем разницу
+//    tmr1 = millis();                   // сброс таймера
+//    if ((control_mode!=a_button)&&(a_button==before_mode)){
+//  control_mode=a_button;}
+//  before_mode=a_button;
+// }
+//
+//  if (control_mode==1){
+//    if (b_button==1){
+//      Serial.print("крутим сервой");
+//      //servo5.write(79);
+//      }
+//      if (b_button==0){
+//        Serial.print("крутим сервой");
+//      //servo5.write(10);
+//      }
+
+//    
+  //angle4=map(xleft, -255, 255, -180, 180);
+  
+  //}
+//
+//
+
+//  //angle4=map(xleft, -255, 255, -180, 180);
+//
+//
+//
+//
+//    //atmr3=millis();
+
+//  
+//  
+//
+//      
+//    
+//      
+//  
+//  atmr2=millis();
+//
+//  
+//  }// end control mode 1
+//  
+  //}
+  
+
+ 
+
+
+
+
+
+ 

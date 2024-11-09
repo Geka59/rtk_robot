@@ -1,0 +1,323 @@
+
+#include <Servo.h>
+///////// servo pins 9 10 11 12 flash
+#define pin_s1_l 11
+#define pin_s1_main 11 // серво манипулятор главное звено
+#define pin_s2 11 // серво захват
+#define pin_s3 11
+#define pin_s4 11
+#define pin_s5 11
+// Флаг для отслеживания начала сообщения
+
+Servo servo5;
+Servo servo4;
+Servo servo2_catch;
+Servo servo3;
+Servo servo1_l;
+Servo servo1_s1_main;
+
+
+
+
+#define M1_PWM 5 // ШИМ пин, на плате 6 ..2
+#define M1_INA 3 // INA пин, на плате ..20
+#define M1_INB 4   // INB пин, на плате  ..21
+
+#define M2_PWM 8 // ШИМ пин, на плате ..11
+#define M2_INA 6 // INA пин, на плате  ..28
+#define M2_INB 7 // INB пин, на плате ..24
+
+int xleft=127;
+int yleft=127;
+int xright=127;
+int yright=127;
+int a_button;
+int b_button;
+int x_button;
+int dpad_left;
+int dpad_right;
+int dpad_up;
+int dpad_down;
+int y_button;
+int right_shoulder;
+int left_shoulder;
+int r_trigger_index_pos ;
+int l_trigger_index_pos;
+
+
+
+bool before_mode=0;
+bool control_mode=0;
+
+int angle1=90;
+//int angle1_r;
+int angle2=10;
+int angle3=90;
+int angle4=90;
+int angle5=40;
+
+int home_angle1=15;
+//int angle1_r;
+int home_angle2=11;
+int home_angle3=90;
+int home_angle4=90;
+int home_angle5=40;
+
+//int dynamixelAngle=2047;
+
+int kin_angle1=90;
+int kin_angle2=10;
+int kin_angle3=90;
+
+
+uint32_t send_timer;
+uint32_t tmr1;
+uint32_t atmr1;
+uint32_t tmr2;
+uint32_t tmr3;
+uint32_t atmr4;
+uint32_t atmr5;
+
+//byte deadzone_s1_l[] = {15,180};// 0  самый перед
+//byte deadzone_s1_r[] = {180,15};//180 самый перед;
+////byte deadzone_s5[] = {10,79};
+//byte deadzone_s2[] = {11,180};
+//byte deadzone_s3[] = {0,180};
+//byte deadzone_s4[] = {0,180};
+//byte deadzone_s5[] = {40,130};
+
+bool start_parce=false;
+bool good_packet=false;
+int index;
+unsigned char data[19];
+typedef uint16_t ui16;
+typedef uint8_t ui8;
+
+
+ui16 crc16;
+ui16 crc16_custom (ui8 *data, ui16 length1){
+   ui16 crc = 0xFFFF;
+    for (int i=0; i<length1; i++){
+        crc ^= data[i] << 8;
+        for (int j=0; j<8;j++){
+            if ((crc & 0x8000) > 0)
+                crc =(crc << 1) ^ 0x1021;
+            else
+                crc = crc << 1;}}
+    return crc & 0xFFFF;}
+
+
+
+// memcpy strunct
+//unit_8t availble 
+
+typedef enum
+{
+  PARSER_IDLE = 0,
+  PARSER_READY,
+  PARSER_CHECKING
+} parserState_t;
+
+static parserState_t parserState = PARSER_IDLE;
+uint8_t rxData [21];
+
+uint8_t rxData2 [21];
+
+int counter=0;
+
+
+
+          
+  
+           
+              
+
+
+         
+
+
+void send_data(){
+  //if Serial1.availebleforWrite
+  if (millis()-send_timer>300){Serial1.print(String(934)+","+String(344));send_timer=millis();}
+  }
+
+ 
+void setup() {
+  delay(1000);
+
+  pinMode(M1_PWM, OUTPUT);
+  pinMode(M1_INA, OUTPUT);
+  pinMode(M1_INB, OUTPUT);
+  pinMode(M2_PWM, OUTPUT);
+  pinMode(M2_INA, OUTPUT);
+  pinMode(M2_INB, OUTPUT);
+  Serial.begin(115200);
+  Serial1.begin(57600);
+  
+  servo1_l.attach(pin_s1_l);
+  servo1_s1_main.attach(pin_s1_main);
+  servo2_catch.attach(pin_s2);
+  servo3.attach(pin_s3);
+  servo4.attach(pin_s4);
+  servo5.attach(pin_s5);
+  
+  servo1_l.write(180-15);
+  servo1_s1_main.write(15);
+  servo2_catch.write(50);
+  servo3.write(0);
+  servo4.write(90);
+  servo5.write(44);
+  Mpu_setup();
+  ina_setup();
+  delay(500);
+
+
+
+}
+void loop() {
+  switch (parserState)
+  {
+    case PARSER_IDLE :
+    {
+      if (Serial1.available() > 0)
+      {      
+         *rxData = Serial1.read();
+
+         if (*rxData == 255)
+         {
+            parserState = PARSER_READY;
+            counter = 0;//1
+         }
+      }
+    
+      break;
+    }
+
+    case PARSER_READY :
+    {
+      uint8_t availableBytes;
+
+      availableBytes = Serial1.available();
+
+      for (ui8 i = 0; i < availableBytes; i++)
+      {
+        rxData[counter] = Serial1.read();
+        counter++;
+
+        if (counter >= 21)
+        {
+          counter = 0;
+          parserState = PARSER_CHECKING;
+        }
+      }
+
+      break;
+    }
+
+    case PARSER_CHECKING :
+    {
+
+      memcpy(rxData2, rxData, 21);
+      //memcpy(rxData, crcData, 20);
+      //memset(rxData, 0, 22);
+      crc16 = rxData2[19];
+      crc16 |= ((rxData2[20] << 8) & 0xFF00);
+      parserState = PARSER_IDLE;
+      if (crc16_custom(rxData2, 19) == crc16){
+         xleft=rxData2[0];
+           yleft=rxData2[1];
+           xright=rxData2[2];
+           yright=rxData2[3];
+            a_button=rxData2[4];
+            b_button=rxData2[5];
+            x_button=rxData2[6];
+            y_button=rxData2[7];
+            dpad_right=rxData2[8];
+            dpad_left=rxData2[9] ;
+            
+            dpad_up=rxData2[10];
+            dpad_down=rxData2[11];
+            right_shoulder=rxData2[12];
+            left_shoulder=rxData2[13];
+
+            r_trigger_index_pos=rxData2[14];
+            l_trigger_index_pos=rxData2[15];
+
+            kin_angle1=rxData2[16];
+            kin_angle2=rxData2[17];
+            kin_angle3=rxData2[18];
+      
+      for(int i = 0; i < 21; i++){
+      Serial.print(rxData2[i]);
+      Serial.print(' ');}
+    
+      Serial.println();
+      
+       ina_loop();
+        Mpu_loop();
+    }}
+    break;
+  }
+         
+
+  
+ //parsing();
+ //debug_print();
+
+ //send_data();
+
+
+if ((control_mode!=a_button)&&(before_mode==a_button)){control_mode=a_button;}
+before_mode=a_button;
+
+if (control_mode==0){ // УПРАВЛЕНИЕ КОЛЕСКИКАМИ
+  if (yright>=127){ 
+  digitalWrite(M1_INA, HIGH);
+  digitalWrite(M1_INB, LOW);
+  analogWrite(M1_PWM, 2*(yright-127));}
+  if (yright<127){ 
+  digitalWrite(M1_INA, LOW);
+  digitalWrite(M1_INB, HIGH);
+  analogWrite(M1_PWM, 2*(127-yright));}
+
+  ///---------------------------/M2
+  if (yleft<127){ 
+  digitalWrite(M2_INA, HIGH);
+  digitalWrite(M2_INB, LOW);
+ 
+  analogWrite(M2_PWM, 2*(127-yleft));}
+  if (yleft>=127){ 
+  digitalWrite(M2_INA, LOW);
+  digitalWrite(M2_INB, HIGH);
+ 
+  analogWrite(M2_PWM, 2*(yleft-127));}
+  }// end driving ///// end of driving mode////
+
+
+
+
+if (control_mode==1){
+
+  servo1_s1_main.write(angle1);
+  servo2_catch.write(angle2);
+
+  }
+  if ((millis()-tmr2>=10)&&(dpad_down==1)&&(angle1<180)){angle1++;tmr2=millis();}
+  if ((millis()-tmr2>=10)&&(dpad_up==1)&&(angle1>0)){angle1--;tmr2=millis();}
+
+
+  if ((millis()-tmr3>=18)&&(right_shoulder==1)&&(angle2<85)){angle2++;tmr3=millis();Serial.println("yep");}
+  if ((millis()-tmr3>=18)&&(left_shoulder==1)&&(angle2>10)){angle2--;tmr3=millis();Serial.println("no yep");}
+ 
+
+
+}
+  
+
+ 
+
+
+
+
+
+ 
