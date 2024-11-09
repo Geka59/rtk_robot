@@ -1,0 +1,609 @@
+from XInput import *
+import math
+import serial
+import struct
+import time
+import serial.tools.list_ports
+ports = serial.tools.list_ports.comports()
+import cv2
+video=cv2.VideoCapture(1)
+qcd=cv2.QRCodeDetector()
+import numpy as np
+video.set(3, 1920)
+video.set(4, 1080)
+print(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+print(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+qr_text=""
+#set_deadzone(DEADZONE_TRIGGER, 10)
+import struct
+left=127
+right=127
+# class Controller:
+#     def __init__(self, center):
+#         self.center = center
+
+# controllers = (Controller((150., 100.)),
+#                Controller((450., 100.)),
+#                Controller((150., 300.)),
+#                Controller((450., 300.)))
+auto_mode=False
+def rescale_frame(frame, percent=75):
+    #width = int(frame.shape[1] * percent/ 100)
+    #height = int(frame.shape[0] * percent/ 100)
+    #dim = (1540, 800)
+    dim = (1540, 795)
+    return cv2.resize(frame, dim, interpolation = cv2.INTER_LINEAR)
+
+timing=time.time()
+
+cox =[100,100,198,198]
+coy =[170,51,51,19]
+
+
+
+camera_matrix = np.array([[704.13172952, 0.0, 308.54435489],
+ [0.00,669.06918148 ,223.44098369],
+ [0.00,0.00,1.00]]);
+dist_coefs = np.array([-1.60345488, 3.78136809, 0.03585487, 0.01674275, -7.60275866]);
+
+b_angle=False
+
+qr_mode=False
+line_mode=False
+port = "COM4"  # Replace with the appropriate COM port name 9COM
+baudrate = 57600  # Replace with
+# the desired baud rate
+
+fake_ox =[100,100,198,198]
+fake_oy =[170,51,51,19]
+
+ser = serial.Serial(port, baudrate=baudrate)
+left_position=[0,0]
+l_thumb_stick_pos=[127,127]
+r_thumb_stick_pos=[127,127]
+r_trigger_index_pos=0
+l_trigger_index_pos=0
+a_button=0
+b_button=0
+x_button=0
+y_button=0
+left_shoulder=0
+right_shoulder=0
+dpad_left = 0
+dpad_right = 0
+dpad_up = 0
+dpad_down = 0
+
+kin_angle1=15
+kin_angle2=11
+kin_angle3=90
+
+kr_x=0
+kr_y=0
+
+def dot(vA, vB):
+    return vA[0] * vB[0] + vA[1] * vB[1]
+
+
+def angle_beet(lineA, lineB):
+    # Get nicer vector form
+    vA = [(lineA[0][0] - lineA[1][0]), (lineA[0][1] - lineA[1][1])]
+    vB = [(lineB[0][0] - lineB[1][0]), (lineB[0][1] - lineB[1][1])]
+    # Get dot prod
+    dot_prod = dot(vA, vB)
+    # Get magnitudes
+    magA = dot(vA, vA) ** 0.5
+    magB = dot(vB, vB) ** 0.5
+    # Get cosine value
+    cos_ = dot_prod / magA / magB
+    # Get angle in radians and then convert to degrees
+    angle = math.acos(dot_prod / magB / magA)
+    # Basically doing angle <- angle mod 360
+    ang_deg = math.degrees(angle) % 360
+
+    if ang_deg - 180 >= 0:
+        # As in if statement
+        return round(360 - ang_deg)
+    else:
+
+        return round(ang_deg)
+
+
+def intersect(x1, y1, r1, x2, y2, r2):
+    centerdx = x1 - x2
+    centerdy = y1 - y2
+    R = (centerdx * centerdx + centerdy * centerdy)** (0.5)
+    if not (abs(r1 - r2) <= R and R <= r1 + r2):
+        """ No intersections """
+        return []
+    R2 = R*R
+    R4 = R2*R2
+    a = (r1*r1 - r2*r2) / (2 * R2)
+    r2r2 = (r1*r1 - r2*r2)
+    c = (2 * (r1*r1 + r2*r2) / R2 - (r2r2 * r2r2) / R4 - 1)** (0.5)
+    fx = (x1+x2) / 2 + a * (x2 - x1)
+    gx = c * (y2 - y1) / 2
+    ix1 = fx + gx
+    ix2 = fx - gx
+    fy = (y1+y2) / 2 + a * (y2 - y1)
+    gy = c * (x1 - x2) / 2
+    iy1 = fy + gy
+    iy2 = fy - gy
+    return [[round(ix1), round(iy1)], [round(ix2), round(iy2)]]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def crc16(data : bytearray, offset , length):
+    if data is None or offset < 0 or offset > len(data)- 1 and offset+length > len(data):
+        return 0
+    crc = 0xFFFF
+    for i in range(0, length):
+        crc ^= data[offset + i] << 8
+        for j in range(0,8):
+            if (crc & 0x8000) > 0:
+                crc =(crc << 1) ^ 0x1021
+            else:
+                crc = crc << 1
+    return crc & 0xFFFF
+
+
+
+
+
+
+
+while 1:
+
+    events = get_events()
+    #if ser.in_waiting > 0:
+        # line = ser.readline().decode().strip()
+        # print(line)
+    for event in events:
+        #controller = controllers[event.user_index]
+        if event.type == EVENT_CONNECTED:
+            #print('EBAT CONNECTED')
+            pass
+            #canvas.itemconfig(controller.on_indicator, fill="light green")
+
+        elif event.type == EVENT_DISCONNECTED:
+            pass
+            #canvas.itemconfig(controller.on_indicator, fill="")
+
+        elif event.type == EVENT_STICK_MOVED:
+            if event.stick == LEFT:
+                l_thumb_stick_pos=(int(round(127+(127*event.x),0)),int(round(127+(127*event.y),0)))
+                left_position=l_thumb_stick_pos
+                #print(l_thumb_stick_pos)
+                #canvas.coords(controller.l_thumb_stick, (
+                #l_thumb_stick_pos[0] - 10, l_thumb_stick_pos[1] - 10, l_thumb_stick_pos[0] + 10,
+                #l_thumb_stick_pos[1] + 10))
+
+            elif event.stick == RIGHT:
+                # r_thumb_stick_pos = (int(round(255 * (event.x), 0)),
+                #                      int(round(255 * (event.y), 0)))
+                r_thumb_stick_pos=(int(round(127+(127*event.x),0)),int(round(127+(127*event.y),0)))
+                #print(127+event.x*127)
+                #print(r_thumb_stick_pos)
+        elif event.type == EVENT_BUTTON_PRESSED:
+            if event.button == "A":
+                if a_button==1:
+                    a_button=0
+                else:
+                    a_button=1
+            # elif event.button == "B":
+            #     #if b_button==1:
+            #     b_button=1
+                #     b_button=0
+                # else:
+                #     b_button=1
+            elif event.button == "Y":
+                y_button=1
+                    #y_button=1
+
+            elif event.button == "X":
+                x_button=1
+                # if x_button == 1:
+                #     x_button = 0
+                # else:
+                #     x_button = 1
+
+            elif event.button == "DPAD_LEFT":
+                dpad_left=1
+            elif event.button == "DPAD_RIGHT":
+                dpad_right = 1
+            elif event.button == "DPAD_UP":
+                dpad_up=1
+            elif event.button == "DPAD_DOWN":
+                dpad_down = 1
+            elif event.button == "BACK":
+                qr_mode=(not qr_mode)
+            # elif event.button == "START":
+            #     line_mode = (not line_mode)
+
+
+            elif event.button == "LEFT_SHOULDER":
+                left_shoulder=1
+            elif event.button == "RIGHT_SHOULDER":
+                right_shoulder=1
+
+        elif event.type == EVENT_BUTTON_RELEASED:
+            if event.button == "DPAD_LEFT":
+                dpad_left = 0
+            elif event.button == "DPAD_RIGHT":
+                dpad_right = 0
+            elif event.button == "DPAD_UP":
+                dpad_up = 0
+            elif event.button == "DPAD_DOWN":
+                dpad_down = 0
+            elif event.button == "LEFT_SHOULDER":
+                left_shoulder = 0
+            elif event.button == "RIGHT_SHOULDER":
+                right_shoulder = 0
+            elif event.button == "X":
+                x_button=0
+            elif event.button == "B":
+                b_button = 0
+            elif event.button == "Y":
+                y_button=0
+
+
+        elif event.type == EVENT_TRIGGER_MOVED:
+            if event.trigger == LEFT:
+                l_trigger_index_pos = (int(round(8 * event.value, 0)))
+            elif event.trigger == RIGHT:
+                r_trigger_index_pos = (int(round(8 * event.value, 0)))
+    #print(left_position)
+    if a_button==1:
+        #print(coy)
+        control_mode='Manipulator control'
+
+        if ((r_thumb_stick_pos[1]>150) and (intersect(cox[0], coy[0],119 ,cox[2], (coy[2]-1),98)!=[])):
+            fake_oy[2]-=1
+            fake_ox[3] = fake_ox[2]
+            fake_oy[3] = fake_oy[2]-32
+        if (r_thumb_stick_pos[1]<100) and (intersect(cox[0], coy[0],119 ,cox[2], (coy[2]+1),98)!=[]):
+            fake_oy[2]+=1
+            fake_ox[3] = fake_ox[2]
+            fake_oy[3] = fake_oy[2]-32
+
+        if ((l_thumb_stick_pos[1]>150) and (intersect(cox[0], coy[0],119 ,(cox[2]+1), coy[2],98)!=[])):
+            fake_ox[2]+=1
+            fake_ox[3] = fake_ox[2]
+            fake_oy[3] = fake_oy[2]-32
+        if (l_thumb_stick_pos[1]<100) and (intersect(cox[0], coy[0],119 ,(cox[2]-1), coy[2],98)!=[]):
+            fake_ox[2]-=1
+            fake_ox[3] = fake_ox[2]
+            fake_oy[3] = fake_oy[2]-32
+        coor_per_okr=intersect(fake_ox[0], fake_oy[0],119,fake_ox[2], fake_oy[2],98)
+        fake_ox[1]=coor_per_okr[0][0]
+        fake_oy[1]=coor_per_okr[0][1]
+        angle2 = (angle_beet([(fake_ox[0], fake_oy[0]), (fake_ox[1], fake_oy[1])], [(fake_ox[1], fake_oy[1]), (fake_ox[2], fake_oy[2])])) ## добавит огрвнцение на 0
+        angle1 = angle_beet([(10, 170), (fake_ox[0], fake_oy[0])], [(fake_ox[0], fake_oy[0]),(fake_ox[1], fake_oy[1])]) # для нижнего звена
+        angle3 =  angle_beet([(fake_ox[1],fake_oy[1]), (fake_ox[2], fake_oy[2])], [(fake_ox[2], fake_oy[2]), (fake_ox[3], fake_oy[3])])
+        if ((dpad_up==1) and (angle3<179)):
+            angle3+=1
+        if ((dpad_down==1) and (angle3>1)):
+            angle3-=1
+        #print((cox!=fake_ox)or(coy!=fake_oy))# для нижнего звена
+        if ((angle1>15) and (175 > angle1) and (angle2 > 10) and (angle2<178)and (angle3>5) and (angle3 < 179)):
+            cox=fake_ox[:]
+            coy=fake_oy[:]
+            kin_angle1 = 180 - angle1
+            kin_angle2 = 180 - angle2
+            kin_angle3 = (angle3)
+            #print('Good angles')
+            b_angle=False
+            print(cox[2],coy[2])
+        else:
+            b_angle=True
+            print('Bad angles: ')
+            print(cox,coy)
+            fake_ox = cox[:]
+            fake_oy = coy[:]
+        #print(kin_angle3)
+
+
+
+
+    else:
+        control_mode='Driving mode'
+
+    #print(f"0xff {l_thumb_stick_pos[0]}|{l_thumb_stick_pos[1]}|{r_thumb_stick_pos[0]}|{r_thumb_stick_pos[1]}")
+    #ser.write((f"0xff {l_thumb_stick_pos[0]}|{l_thumb_stick_pos[1]}|{r_thumb_stick_pos[0]}|{r_thumb_stick_pos[1]}l").encode())
+# Правильный авриант    #str_otpr='x'+str(l_thumb_stick_pos[0])+'|'+str(l_thumb_stick_pos[1])+'|'+str(r_thumb_stick_pos[0])+'|'+str(r_thumb_stick_pos[1])+'|'+str(a_button)+'|'+str(b_button)+'b'
+    control_sum=0
+    # control_sum=l_thumb_stick_pos[0]+l_thumb_stick_pos[1]+r_thumb_stick_pos[0]+\
+    #             r_thumb_stick_pos[1]+a_button+b_button+x_button+y_button+dpad_left+dpad_right+dpad_up+dpad_down+\
+    #             right_shoulder+left_shoulder+r_trigger_index_pos+l_trigger_index_pos
+    # control_ost=((control_sum))%113
+
+
+
+    if  (line_mode) or auto_mode:
+        str_otpr_w = [(l_thumb_stick_pos[0]), (left), (r_thumb_stick_pos[0]), (right),
+                      a_button, b_button, x_button, y_button, dpad_right, dpad_left, dpad_up, dpad_down, right_shoulder,
+                      left_shoulder, r_trigger_index_pos, l_trigger_index_pos, kin_angle1, kin_angle2, kin_angle3]
+        # +'|'+str(b_button)+'|'+str(x_button)+'|'+str(y_button)+'|'+str(dpad_left)+'|'+str(dpad_right)+'|'+str(dpad_up)+'|'+str(dpad_down)
+
+    else:
+        str_otpr_w=[(l_thumb_stick_pos[0]),(l_thumb_stick_pos[1]),(r_thumb_stick_pos[0]),(r_thumb_stick_pos[1]),a_button,b_button,x_button,y_button,dpad_right,dpad_left,dpad_up,dpad_down,right_shoulder,left_shoulder,r_trigger_index_pos,l_trigger_index_pos,kin_angle1,kin_angle2,kin_angle3]
+             # +'|'+str(b_button)+'|'+str(x_button)+'|'+str(y_button)+'|'+str(dpad_left)+'|'+str(dpad_right)+'|'+str(dpad_up)+'|'+str(dpad_down)
+             # +'|'+str(control_ost)+'99')
+
+
+    control_crc=crc16(str_otpr_w,0,19)
+    crc0 = control_crc & 0x00FF
+    crc1 = (control_crc & 0xFF00) >> 8
+    if line_mode or auto_mode:
+        str_otpr = [255, (l_thumb_stick_pos[0]), left, (r_thumb_stick_pos[0]), right,
+                    a_button, b_button, x_button, y_button, dpad_right, dpad_left, dpad_up, dpad_down, right_shoulder,
+                    left_shoulder, r_trigger_index_pos, l_trigger_index_pos, kin_angle1, kin_angle2, kin_angle3, crc0,
+                    crc1]
+    else:
+        str_otpr = [255,(l_thumb_stick_pos[0]), (l_thumb_stick_pos[1]), (r_thumb_stick_pos[0]), (r_thumb_stick_pos[1]),
+                a_button, b_button, x_button, y_button, dpad_right, dpad_left, dpad_up, dpad_down, right_shoulder,
+                left_shoulder, r_trigger_index_pos, l_trigger_index_pos,kin_angle1,kin_angle2,kin_angle3,crc0,crc1]
+
+
+    # +'|'+str(b_button)+'|'+str(x_button)+'|'+str(y_button)+'|'+str(dpad_left)+'|'+str(dpad_right)+'|'+str(dpad_up)+'|'+s
+    # str_otpr=('x'+str(l_thumb_stick_pos[0])+'|'+str(l_thumb_stick_pos[1])+
+    #           '|'+str(r_thumb_stick_pos[0])+'|'+str(r_thumb_stick_pos[1])+'|'+str(a_button)+'|'+str(b_button)+'k')
+
+#     str_otpr=('y'+str(l_thumb_stick_pos[0])+'|'+str(l_thumb_stick_pos[1])+'|'+str(r_thumb_stick_pos[0])+
+#               '|'+str(r_thumb_stick_pos[1])+'|'+str(a_button)+'|'+str(b_button)+'|'+str(x_button)+'|'+
+#               str(dpad_left)+'|'+str(dpad_right)+'|'+str(dpad_up)+'|'+str(dpad_down)+'|'+str(left_shoulder)+'|'+str(right_shoulder)+'|'+str(l_trigger_index_pos)+'|'+str(r_trigger_index_pos)
+# +'|'+str(control_ost)+'k')
+#     #arr1=[14,'|',88,'|']
+#print(str_otpr.encode('ascii'))
+    # todo разделение потоков
+    # todo установка граничных условий кинематики #  типа готово
+    # todo добавлениe qr кодиков
+    # todo установка начальных позиций манипулятора
+    # todo ручное управление некоторых звееньев
+    # todo родить линию
+    ser.write(str_otpr)
+    print(str_otpr)
+
+
+    #ser.write(str_otpr.encode('ascii'))
+    #time.sleep(0.015)
+    hasFrame, frame = video.read()
+    if ((a_button==1) and (line_mode==False)):
+        cv2.putText(frame, "Manipulator_mode", (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ((0, 255, 0)), 2,
+                    cv2.LINE_AA)
+    if ((a_button == 0) and (line_mode == False)):
+        cv2.putText(frame, "Driving_mode", (10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ((0, 255, 0)), 2,
+                    cv2.LINE_AA)
+    if qr_mode:
+
+        h, w = frame.shape[:2]
+        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coefs, (w, h), 1, (w, h))
+
+        frame = cv2.undistort(frame, camera_matrix, dist_coefs, None, newcameramtx)
+
+        x, y, w, h = roi
+        frame = frame[y:y + h - 50, x + 70:x + w - 20]
+
+        #cv2.imshow('Frames', dst)
+
+        cv2.putText(frame, "QR_MODE", (480, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, ((0, 255, 0)), 2,
+                    cv2.LINE_AA)
+        if (qr_text!=""):
+            cv2.putText(frame, qr_text[0], (100, 200), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1,
+                        cv2.LINE_AA)
+        retval, decoded_info, points, straigt_qr_code = qcd.detectAndDecodeMulti(frame)
+        if retval:
+            cv2.polylines(frame, points.astype(int), True, (0, 255, 0),3)
+            #print(decoded_info,"decoded_info")
+            if ((decoded_info[0]!='')and(qr_text=="")):
+                qr_text=decoded_info
+                #print(qr_text[0])
+            # cv2.putText(frame, "ЕБАНЫЕ БУКВЫ", (250,200), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 255), 2,
+            #             cv2.LINE_AA)
+            # for s,p in zip(decoded_info,points):
+            #     cv2.putText(frame,qr_text[0],p[0].astype(int), cv2.FONT_HERSHEY_COMPLEX,1,(0,0,255),2, cv2.LINE_AA)
+    else:
+        qr_text=""
+    if line_mode:
+        min_pwm_speed=50
+        kp=1.3
+        cv2.putText(frame, "LINE_MODE", (480, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, ((0, 0, 255)), 2,
+                    cv2.LINE_AA)
+        #cv2.line(frame, (640, 0), (640, 480), (0, 255, 0), 1)
+        #cv2.line(frame, (320, 0), (320, 480), (0, 255, 0), 1)
+        cv2.rectangle(frame, (0, 480), (640, 400), (255, 255, 255), -1)
+        cv2.rectangle(frame, (0, 480), (170, 320), (255, 255, 255), -1)
+        cv2.rectangle(frame, (640, 480), (495, 320), (255, 255, 255), -1)
+        low_b = np.uint8([58, 58, 55])#low_b = np.uint8([44, 44, 46])
+        high_b = np.uint8([0, 0, 0])
+        mask = cv2.inRange(frame, high_b, low_b)
+        contours, hierarchy = cv2.findContours(mask, 1, cv2.CHAIN_APPROX_NONE)
+        if len(contours) > 0:
+            c = max(contours, key=cv2.contourArea)
+            M = cv2.moments(c)
+            if M["m00"] != 0:
+                cx = int(M['m10'] / M['m00'])
+                cy = int(M['m01'] / M['m00'])
+                #print("CX : " + str(cx) + "  CY : " + str(cy))
+
+                cv2.putText(frame, str(320-cx), (320, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, ((0, 0, 255)), 2,
+                            cv2.LINE_AA)
+
+                right = 127 + round(kp * (320 - cx)) + 28
+                left = 127 - round(kp * (320 - cx)) + 28
+
+                if right>254:
+                    right=254
+                if right<0:
+                    right=0
+                if left>254:
+                    left=254
+                if left<0:
+                    left=0
+                # if (((127+round(kp*(320-cx))+30)>0) and ((127+round(kp*(320-cx))+30)<255) and (((127-round(kp*(320-cx))+30)>0) and ((127-round(kp*(320-cx))+30)<255))):
+                #     right=127+round(kp*(320-cx))+50
+                #     left=127-round(kp*(320-cx))+50
+                #print(right,left)
+                # if cx >= 120:
+                #     print("Turn Left")
+                #
+                # if cx < 120 and cx > 40:
+                #     print("On Track!")
+                #
+                # if cx <= 40:
+                #     print("Turn Right")
+
+                cv2.circle(frame, (cx, cy), 5, (255, 255, 255), -1)
+        else:
+            print("I don't see the line")
+
+        cv2.drawContours(frame, c, -1, (0, 255, 0), 1)
+
+        #cv2.imshow("Mask", mask)
+
+        #cv2.imshow("Mask", mask)
+
+    frame150 = rescale_frame(frame, percent=150)
+
+
+    cv2.rectangle(frame150, (10, 10), (250, 200), (255, 255, 255), -1)
+    cv2.line(frame150, (10, 170), (250, 170), (0, 0, 0), 2)  # black groun
+    cv2.line(frame150, (40, 142), (211, 142), (0, 0, 0), 2)
+    #cv2.line(frame150, (211, 142), (211, 170), (0, 0, 0), 2)
+    cv2.circle(frame150, (cox[0], coy[0]), 4, (123, 124, 155), 4)  # zero point
+    #cv2.circle(frame150, (cox[0], coy[0]), 119, (123, 0, 155), 4)  # first circ
+    cv2.line(frame150, (cox[0], coy[0]), (cox[1], coy[1]), (255, 0, 0), 2)
+    cv2.circle(frame150, (cox[1], coy[1]), 4, (255, 124, 155), 4)
+    cv2.line(frame150, (cox[1], coy[1]), (cox[2], coy[2]), (0, 255, 0), 2)
+    #cv2.circle(frame150, (cox[2], coy[2]), 98, (0, 155, 155), 4)  # second circ
+    cv2.line(frame150, (cox[2], coy[2]), (cox[3] + 32, coy[3] + 32), (255, 255, 89), 2)
+    if b_angle:
+        cv2.putText(frame150,"Bad Angle",(60,197),cv2.FONT_HERSHEY_SIMPLEX,0.8,((147, 6, 167)),2,cv2.LINE_AA)
+
+
+
+
+
+
+
+    try:
+        cv2.imshow("Face detection", frame150)
+    # если кадра нет
+        if not hasFrame:
+        # останавливаемся и выходим из цикла
+            cv2.waitKey()
+    except:
+        video.release()
+
+    if cv2.waitKey(1) & 0xFF == ord('l'):
+        cv2.destroyAllWindows()
+
+
+
+    # if y_button==1 and auto_mode==False and(time.time() - timing >= 1.5):
+    #     timing = time.time()
+    #     auto_mode=True
+
+    if y_button==1 and auto_mode==True and (time.time() - timing >= 0.2):
+        auto_mode=False
+        timing=time.time()
+
+    if auto_mode:
+        left=200
+        right=200
+        if time.time() - timing > 4.0:
+            timing = time.time()
+            auto_mode=False
+    print(auto_mode)
+        # elif event.type == EVENT_TRIGGER_MOVED:
+        #     if event.trigger == LEFT:
+        #
+        #         l_trigger_index_pos = (
+        #         controller.l_trigger_pos[0], controller.l_trigger_pos[1] - 20 + int(round(40 * event.value, 0)))
+        #         canvas.coords(controller.l_trigger_index, (
+        #         l_trigger_index_pos[0] - 10, l_trigger_index_pos[1] - 5, l_trigger_index_pos[0] + 10,
+        #         l_trigger_index_pos[1] + 5))
+        #     elif event.trigger == RIGHT:
+        #         r_trigger_index_pos = (
+        #         controller.r_trigger_pos[0], controller.r_trigger_pos[1] - 20 + int(round(40 * event.value, 0)))
+        #         canvas.coords(controller.r_trigger_index, (
+        #         r_trigger_index_pos[0] - 10, r_trigger_index_pos[1] - 5, r_trigger_index_pos[0] + 10,
+        #         r_trigger_index_pos[1] + 5))
+        #
+        # elif event.type == EVENT_BUTTON_PRESSED:
+        #     if event.button == "LEFT_THUMB":
+        #         canvas.itemconfig(controller.l_thumb_stick, fill="red")
+        #     elif event.button == "RIGHT_THUMB":
+        #         canvas.itemconfig(controller.r_thumb_stick, fill="red")
+        #
+        #     elif event.button == "LEFT_SHOULDER":
+        #         canvas.itemconfig(controller.l_shoulder, fill="red")
+        #     elif event.button == "RIGHT_SHOULDER":
+        #         canvas.itemconfig(controller.r_shoulder, fill="red")
+        #
+        #     elif event.button == "BACK":
+        #         canvas.itemconfig(controller.back_button, fill="red")
+        #     elif event.button == "START":
+        #         canvas.itemconfig(controller.start_button, fill="red")
+        #
+        #
+        #
+        #     elif event.button == "A":
+        #         print('a pres')
+        #     elif event.button == "B":
+        #         canvas.itemconfig(controller.B_button, fill="red")
+        #     elif event.button == "Y":
+        #         canvas.itemconfig(controller.Y_button, fill="red")
+        #     elif event.button == "X":
+        #         canvas.itemconfig(controller.X_button, fill="red")
+        #
+        # elif event.type == EVENT_BUTTON_RELEASED:
+        #     if event.button == "LEFT_THUMB":
+        #         canvas.itemconfig(controller.l_thumb_stick, fill="")
+        #     elif event.button == "RIGHT_THUMB":
+        #         canvas.itemconfig(controller.r_thumb_stick, fill="")
+        #
+        #     elif event.button == "LEFT_SHOULDER":
+        #         canvas.itemconfig(controller.l_shoulder, fill="")
+        #     elif event.button == "RIGHT_SHOULDER":
+        #         canvas.itemconfig(controller.r_shoulder, fill="")
+        #
+        #     elif event.button == "BACK":
+        #         canvas.itemconfig(controller.back_button, fill="")
+        #     elif event.button == "START":
+        #         canvas.itemconfig(controller.start_button, fill="")
+        #
+        #     elif event.button == "DPAD_LEFT":
+        #         canvas.itemconfig(controller.dpad_left, fill="")
+        #     elif event.button == "DPAD_RIGHT":
+        #         canvas.itemconfig(controller.dpad_right, fill="")
+        #     elif event.button == "DPAD_UP":
+        #         canvas.itemconfig(controller.dpad_up, fill="")
+        #     elif event.button == "DPAD_DOWN":
+        #         pass
+        #
+        #     elif event.button == "A":
+        #         pass
+        #     elif event.button == "B":
+        #        pass
+        #     elif event.button == "Y":
+        #         pass
+        #     elif event.button == "X":
+        #         pass
